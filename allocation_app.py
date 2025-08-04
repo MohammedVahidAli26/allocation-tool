@@ -129,10 +129,10 @@ class AllocationApp:
             rows_per_head = max(est_row_dist)
 
             self.group_label.config(
-                text=f"🧮 Unique Groups: {total_groups}\n"
+                text=f"🧮 Unique ID's: {total_groups}\n"
                      f"📄 Total Rows: {total_rows}\n"
                      f"🎯 Target Per Head:\n"
-                     f"   • ~{groups_per_head} groups\n"
+                     f"   • ~{groups_per_head} ID's\n"
                      f"   • ~{rows_per_head} rows"
             )
         except ValueError:
