@@ -12,7 +12,7 @@ class AllocationApp:
         self.df = None
         self.file_path = ""
 
-        # Scrollable frame setup
+        # Scrollable layout
         canvas = tk.Canvas(root, borderwidth=0, background="#f0f3f5")
         self.frame = tk.Frame(canvas, background="#f0f3f5")
         vsb = tk.Scrollbar(root, orient="vertical", command=canvas.yview)
@@ -34,16 +34,15 @@ class AllocationApp:
         self.build_ui()
 
     def build_ui(self):
-        # --- Header ---
         tk.Label(self.frame, text="🌈 Excel Allocation Assistant", font=("Segoe UI", 18, "bold"), fg="#2980b9", bg="#f0f3f5").pack(pady=10)
 
-        # --- Upload File ---
+        # Upload Section
         self.section("1️⃣ Upload File", "#1abc9c")
         ttk.Button(self.frame, text="📁 Upload Excel File", command=self.upload_file).pack(pady=5)
         self.file_label = ttk.Label(self.frame, text="", foreground="#34495e", background="#f0f3f5")
         self.file_label.pack()
 
-        # --- Column Selections ---
+        # Column Section
         self.section("2️⃣ Select Columns", "#f39c12")
         ttk.Label(self.frame, text="Group By Column:", background="#f0f3f5").pack(anchor="w", padx=10)
         self.column_dropdown = ttk.Combobox(self.frame, state="readonly")
@@ -53,7 +52,7 @@ class AllocationApp:
         self.assign_column_dropdown = ttk.Combobox(self.frame, state="readonly")
         self.assign_column_dropdown.pack(fill="x", padx=10, pady=5)
 
-        # --- Headcount ---
+        # HC Input
         self.section("3️⃣ Headcount", "#9b59b6")
         hc_row = tk.Frame(self.frame, bg="#f0f3f5")
         hc_row.pack(pady=5)
@@ -64,16 +63,19 @@ class AllocationApp:
         self.group_label = ttk.Label(self.frame, text="", background="#f0f3f5", foreground="#2e86de", justify="left")
         self.group_label.pack(pady=5)
 
-        # --- Associate Names ---
+        # Associate Input
         self.section("4️⃣ Associates", "#e74c3c")
         ttk.Label(self.frame, text="Enter names (comma-separated):", background="#f0f3f5").pack(anchor="w", padx=10)
         self.name_entry = tk.Entry(self.frame, width=70)
         self.name_entry.pack(padx=10, pady=5)
-
         ttk.Button(self.frame, text="🚀 Start Allocation", command=self.allocate).pack(pady=10)
 
-        # --- Progress & Download ---
-        self.section("5️⃣ Finish", "#3498db")
+        # Side panel for breakdown
+        self.breakdown_label = ttk.Label(self.frame, text="", background="#f0f3f5", justify="left", foreground="#2c3e50")
+        self.breakdown_label.pack(pady=10)
+
+        # Progress bar
+        self.section("5️⃣ Finish & Save", "#3498db")
         ttk.Label(self.frame, text="Progress:", font=("Segoe UI", 10, "bold"), background="#f0f3f5").pack(pady=(5, 0))
         self.progress = Progressbar(self.frame, orient=tk.HORIZONTAL, length=500, mode='determinate')
         self.progress.pack(pady=5)
@@ -83,8 +85,7 @@ class AllocationApp:
         self.download_btn.pack(pady=10)
 
     def section(self, title, color):
-        lbl = tk.Label(self.frame, text=title, font=("Segoe UI", 12, "bold"), fg="white", bg=color, anchor="w")
-        lbl.pack(fill="x", pady=(15, 5), padx=0)
+        tk.Label(self.frame, text=title, font=("Segoe UI", 12, "bold"), fg="white", bg=color).pack(fill="x", pady=(15, 5))
 
     def upload_file(self):
         self.file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xlsm")])
@@ -128,10 +129,10 @@ class AllocationApp:
             rows_per_head = max(est_row_dist)
 
             self.group_label.config(
-                text=f"🧮 Unique ID's: {total_groups}\n"
+                text=f"🧮 Unique Groups: {total_groups}\n"
                      f"📄 Total Rows: {total_rows}\n"
                      f"🎯 Target Per Head:\n"
-                     f"   • ~{groups_per_head} ID's\n"
+                     f"   • ~{groups_per_head} groups\n"
                      f"   • ~{rows_per_head} rows"
             )
         except ValueError:
@@ -155,38 +156,44 @@ class AllocationApp:
             return
 
         grouped = self.df.groupby(group_by_col)
-        unique_ids = list(grouped.groups.keys())
-        total_ids = len(unique_ids)
+        group_sizes = [(gid, len(gdf)) for gid, gdf in grouped]
+        group_sizes.sort(key=lambda x: -x[1])  # Sort by descending size
 
-        # Progress bar setup
-        self.progress["maximum"] = total_ids
+        allocation = {name: {"ids": [], "rows": 0} for name in associates}
+
+        for gid, count in group_sizes:
+            least_loaded = min(allocation.items(), key=lambda x: x[1]["rows"])[0]
+            allocation[least_loaded]["ids"].append(gid)
+            allocation[least_loaded]["rows"] += count
+
+        # Update side panel
+        breakdown = "\n📊 Allocation Breakdown:\n"
+        for name in associates:
+            breakdown += f"• {name:<15} → {len(allocation[name]['ids'])} groups, {allocation[name]['rows']} rows\n"
+        self.breakdown_label.config(text=breakdown)
+
+        # Progress bar
+        self.progress["maximum"] = len(self.df)
         self.progress["value"] = 0
         self.frame.update_idletasks()
 
-        # Round-robin group assignment
-        chunks = [[] for _ in range(len(associates))]
-        for idx, gid in enumerate(unique_ids):
-            chunks[idx % len(associates)].append(gid)
-
+        # Apply assignment
         allocation_map = {}
-        for associate, group_ids in zip(associates, chunks):
-            for gid in group_ids:
-                allocation_map[gid] = associate
+        for name in associates:
+            for gid in allocation[name]["ids"]:
+                allocation_map[gid] = name
 
-        # Apply to DataFrame
         assigned_names = []
         for i, row in self.df.iterrows():
             assigned_names.append(allocation_map.get(row[group_by_col], ""))
             if i % 10 == 0:
-                self.progress["value"] += 1
+                self.progress["value"] += 10
                 self.frame.update_idletasks()
 
         self.df[assign_col] = assigned_names
         self.progress["value"] = self.progress["maximum"]
-        self.frame.update_idletasks()
-
-        messagebox.showinfo("Success", "🎉 Allocation complete!")
         self.download_btn.config(state=tk.NORMAL)
+        messagebox.showinfo("✅ Success", "Allocation complete!")
 
     def download_file(self):
         original_name = os.path.basename(self.file_path)
@@ -205,6 +212,6 @@ class AllocationApp:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    root.geometry("700x600")
+    root.geometry("750x650")
     app = AllocationApp(root)
     root.mainloop()
